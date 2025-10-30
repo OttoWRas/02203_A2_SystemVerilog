@@ -58,7 +58,7 @@ module uart #(
   // RX Over-sampling
   logic [3:0] rx_sample_count, rx_sample_count_next;
   logic [15:0] rx_sample_vec;
-  always_ff @(posedge rx_tick or posedge rst) begin
+  always_ff @(posedge clk or posedge rst) begin
     if (rst) begin
       rx_sample_count <= 4'd0;
       rx_sample_vec   <= 16'hffff;
@@ -122,12 +122,12 @@ module uart #(
     endcase
   end
 
-  always_ff @(posedge rx_tick or posedge rst) begin
+  always_ff @(posedge clk or posedge rst) begin
     if (rst) begin
       rx_state     <= RX_IDLE;
       rx_bit_index <= 4'b0;
       rx_shift_reg <= 8'b0;
-    end else begin
+    end else if (rx_tick) begin
       rx_state     <= rx_state_next;
       rx_bit_index <= rx_bit_index_next;
       rx_shift_reg <= rx_shift_reg_next;
@@ -199,12 +199,12 @@ module uart #(
     endcase
   end
 
-  always_ff @(posedge tx_tick or posedge rst) begin
+  always_ff @(posedge clk or posedge rst) begin
     if (rst) begin
       tx_state     <= TX_IDLE;
       tx           <= 1'b1;
       tx_bit_index <= 4'd0;
-    end else begin
+    end else if (tx_tick) begin
       tx_state     <= tx_state_next;
       tx           <= tx_next;
       tx_bit_index <= tx_bit_index_next;
