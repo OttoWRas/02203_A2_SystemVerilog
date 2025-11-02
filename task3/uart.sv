@@ -160,18 +160,23 @@ module uart #(
   } tx_state_t;
   tx_state_t tx_state, tx_state_next;
   logic [2:0] tx_bit_index, tx_bit_index_next;
-  logic tx_next;
+  logic tx_next, data_stream_in_ack_next;
+  logic [7:0] tx_data, tx_data_next;
 
   always_comb begin : tx_fsm_comb
-    tx_state_next      = tx_state;
-    tx_bit_index_next  = 3'd0;
-    tx_next            = 1'b1;  // Line idle high
-    data_stream_in_ack = 1'b0;
+    tx_state_next           = tx_state;
+    tx_bit_index_next       = 3'd0;
+    tx_next                 = 1'b1;  // Line idle high
+    tx_data_next            = tx_data;
+    data_stream_in_ack_next = 1'b0;
 
     case (tx_state)
       TX_IDLE: begin
         if (data_stream_in_stb) begin
           tx_state_next = TX_START;
+          tx_data_next = data_stream_in;
+        end else begin
+          tx_data_next = 8'b0;
         end
       end
 
@@ -181,7 +186,7 @@ module uart #(
       end
 
       TX_DATA: begin
-        tx_next = data_stream_in[tx_bit_index];
+        tx_next = tx_data[tx_bit_index];
         if (tx_bit_index == 3'd7) begin
           tx_state_next = TX_STOP;
         end else begin
@@ -190,9 +195,10 @@ module uart #(
       end
 
       TX_STOP: begin
-        tx_next            = 1'b1;  // Stop bit
-        tx_state_next      = TX_IDLE;
-        data_stream_in_ack = tx_tick;
+        tx_next                 = 1'b1;  // Stop bit
+        tx_state_next           = TX_IDLE;
+        data_stream_in_ack_next = 1'b1;
+        tx_data_next            = 8'b0;
       end
 
       default: tx_state_next = TX_IDLE;
@@ -201,13 +207,19 @@ module uart #(
 
   always_ff @(posedge clk or posedge rst) begin
     if (rst) begin
-      tx_state     <= TX_IDLE;
-      tx           <= 1'b1;
-      tx_bit_index <= 3'd0;
+      tx_state           <= TX_IDLE;
+      tx                 <= 1'b1;
+      tx_bit_index       <= 3'd0;
+      tx_data            <= 8'b0;
+      data_stream_in_ack <= 1'b1;
     end else if (tx_tick) begin
-      tx_state     <= tx_state_next;
-      tx           <= tx_next;
-      tx_bit_index <= tx_bit_index_next;
+      tx_state           <= tx_state_next;
+      tx                 <= tx_next;
+      tx_bit_index       <= tx_bit_index_next;
+      tx_data            <= tx_data_next;
+      data_stream_in_ack <= data_stream_in_ack_next;
+    end else begin
+      data_stream_in_ack <= 1'b0;
     end
   end
 
