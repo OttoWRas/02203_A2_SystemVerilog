@@ -52,39 +52,45 @@ module controller #(
     UPLOAD_B2,
     UPLOAD_B3,
     UPLOAD_WAIT,
+    UPLOAD_WAIT2,
     UPLOAD_CHECK
   } state_type;
 
   state_type state, state_next;
 
-  logic [31:0] data_buffer, data_buffer_next;
+  logic [31:0] data_down_buffer, data_down_buffer_next;
+  logic [31:0] data_up_buffer, data_up_buffer_next;
   logic [MEMORY_ADDR_SIZE-1:0] addr_count, addr_count_next;
+  logic mem_en_next, mem_we_next;
 
   assign mem_addr = addr_count;
-  assign mem_dw   = data_buffer;
+  assign mem_dw   = data_down_buffer;
 
   always_comb begin
-    data_stream_tx     = 8'b0;
-    data_stream_tx_stb = 1'b0;
-    state_next         = state;
-    data_buffer_next   = data_buffer;
-    addr_count_next    = addr_count;
-    mem_en             = 1'b0;
-    mem_we             = 1'b0;
+    data_stream_tx        = 8'b0;
+    data_stream_tx_stb    = 1'b0;
+    state_next            = state;
+    data_down_buffer_next = data_down_buffer;
+    data_up_buffer_next   = data_up_buffer;
+    addr_count_next       = addr_count;
+    mem_en_next           = 1'b0;
+    mem_we_next           = 1'b0;
 
     case (state)
       START: begin
-        data_buffer_next = 32'b0;
+        data_down_buffer_next = 32'b0;
         addr_count_next  = ADDR_COUNT_MIN;
         state_next       = CLEAR;
+        mem_en_next      = 1'b1;
+        mem_we_next      = 1'b1;
       end
       CLEAR: begin
-        mem_en = 1'b1;
-        mem_we = 1'b1;
         if (addr_count == ADDR_COUNT_MAX) state_next = WAIT_AND_CHECK_COMMAND;
         else begin
           addr_count_next = addr_count + 1;
           state_next      = CLEAR;
+          mem_en_next     = 1'b1;
+          mem_we_next     = 1'b1;
         end
       end
       WAIT_AND_CHECK_COMMAND: begin
@@ -94,14 +100,17 @@ module controller #(
             state_next = REPLY_TEST;
           else if (data_stream_rx == 8'h72) begin  // 'r'
             addr_count_next = ADDR_COUNT_UPLOAD_START;
+            mem_en_next     = 1'b1;
             state_next      = UPLOAD_WAIT;
           end else if (data_stream_rx == 8'h77) begin  // 'w'
             addr_count_next = ADDR_COUNT_DOWNLOAD_START;
             state_next      = DOWNLOAD_B0;
           end else if (data_stream_rx == 8'h63) begin  // 'c'
-            data_buffer_next = 32'b0;
-            addr_count_next  = ADDR_COUNT_MIN;
-            state_next       = CLEAR;
+            data_down_buffer_next = 32'b0;
+            addr_count_next       = ADDR_COUNT_MIN;
+            mem_en_next           = 1'b1;
+            mem_we_next           = 1'b1;
+            state_next            = CLEAR;
           end else state_next = WAIT_AND_CHECK_COMMAND;
         end
       end
@@ -114,34 +123,34 @@ module controller #(
       DOWNLOAD_B0: begin
         if (!data_stream_rx_stb) state_next = DOWNLOAD_B0;
         else begin
-          data_buffer_next[7:0] = data_stream_rx;
-          state_next = DOWNLOAD_B1;
+          data_down_buffer_next[7:0] = data_stream_rx;
+          state_next                 = DOWNLOAD_B1;
         end
       end
       DOWNLOAD_B1: begin
         if (!data_stream_rx_stb) state_next = DOWNLOAD_B1;
         else begin
-          data_buffer_next[15:8] = data_stream_rx;
-          state_next = DOWNLOAD_B2;
+          data_down_buffer_next[15:8] = data_stream_rx;
+          state_next                  = DOWNLOAD_B2;
         end
       end
       DOWNLOAD_B2: begin
         if (!data_stream_rx_stb) state_next = DOWNLOAD_B2;
         else begin
-          data_buffer_next[23:16] = data_stream_rx;
-          state_next = DOWNLOAD_B3;
+          data_down_buffer_next[23:16] = data_stream_rx;
+          state_next                   = DOWNLOAD_B3;
         end
       end
       DOWNLOAD_B3: begin
         if (!data_stream_rx_stb) state_next = DOWNLOAD_B3;
         else begin
-          data_buffer_next[31:24] = data_stream_rx;
-          state_next = STORE_DOWNLOAD;
+          data_down_buffer_next[31:24] = data_stream_rx;
+          state_next                   = STORE_DOWNLOAD;
+          mem_en_next                  = 1'b1;
+          mem_we_next                  = 1'b1;
         end
       end
       STORE_DOWNLOAD: begin
-        mem_en = 1'b1;
-        mem_we = 1'b1;
         if (addr_count == ADDR_COUNT_DOWNLOAD_END) state_next = WAIT_AND_CHECK_COMMAND;
         else begin
           addr_count_next = addr_count + 1;
@@ -149,43 +158,43 @@ module controller #(
         end
       end
       UPLOAD_WAIT: begin
-        mem_en     = 1'b1;
-        state_next = UPLOAD_B0;
+        state_next = UPLOAD_WAIT2;
+      end
+      UPLOAD_WAIT2: begin
+        state_next          = UPLOAD_B0;
+        data_up_buffer_next = mem_dr;
       end
       UPLOAD_B0: begin
-        mem_en             = 1'b1;
-        data_stream_tx     = mem_dr[7:0];
+        data_stream_tx     = data_up_buffer[7:0];
         data_stream_tx_stb = 1'b1;
         if (!data_stream_tx_ack) state_next = UPLOAD_B0;
         else state_next = UPLOAD_B1;
       end
       UPLOAD_B1: begin
-        mem_en             = 1'b1;
-        data_stream_tx     = mem_dr[15:8];
+        data_stream_tx     = data_up_buffer[15:8];
         data_stream_tx_stb = 1'b1;
         if (!data_stream_tx_ack) state_next = UPLOAD_B1;
         else state_next = UPLOAD_B2;
       end
       UPLOAD_B2: begin
-        mem_en             = 1'b1;
-        data_stream_tx     = mem_dr[23:16];
+        data_stream_tx     = data_up_buffer[23:16];
         data_stream_tx_stb = 1'b1;
         if (!data_stream_tx_ack) state_next = UPLOAD_B2;
         else state_next = UPLOAD_B3;
       end
       UPLOAD_B3: begin
-        mem_en             = 1'b1;
-        data_stream_tx     = mem_dr[31:24];
+        data_stream_tx     = data_up_buffer[31:24];
         data_stream_tx_stb = 1'b1;
-        if (!data_stream_tx_ack) state_next = UPLOAD_B3;
-        else state_next = UPLOAD_CHECK;
+        if (!data_stream_tx_ack) begin
+          state_next = UPLOAD_B3;
+        end else state_next = UPLOAD_CHECK;
       end
       UPLOAD_CHECK: begin
         if (addr_count == ADDR_COUNT_UPLOAD_END) state_next = WAIT_AND_CHECK_COMMAND;
         else begin
-          mem_en          = 1'b1;
           addr_count_next = addr_count + 1;
-          state_next      = UPLOAD_B0;
+          state_next      = UPLOAD_WAIT;
+          mem_en_next     = 1'b1;
         end
       end
       default: state_next = state;
@@ -194,13 +203,19 @@ module controller #(
 
   always_ff @(posedge clk) begin
     if (reset) begin
-      state       <= START;
-      data_buffer <= 32'b0;
-      addr_count  <= '0;
+      state            <= START;
+      data_down_buffer <= 32'b0;
+      data_up_buffer   <= 32'b0;
+      addr_count       <= '0;
+      mem_en           <= 1'b0;
+      mem_we           <= 1'b0;
     end else begin
-      state       <= state_next;
-      data_buffer <= data_buffer_next;
-      addr_count  <= addr_count_next;
+      state            <= state_next;
+      data_down_buffer <= data_down_buffer_next;
+      data_up_buffer   <= data_up_buffer_next;
+      addr_count       <= addr_count_next;
+      mem_en           <= mem_en_next;
+      mem_we           <= mem_we_next;
     end
   end
 
